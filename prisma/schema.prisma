@@ -38,6 +38,9 @@ model Product {
   shopId        String
   shopName      String
 
+  originalUrl   String?
+  affiliatedUrl String?
+
   categories    ProductCategory[]
   dailyStats    ProductDailyStats[]
 

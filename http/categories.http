@@ -1,0 +1,22 @@
+### Create Category
+POST http://localhost:3000/categories
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYWFjZGE1ZS0yOWFjLTRhMjAtODAzYi1mMmRhZDk0Y2Q4NWYiLCJlbWFpbCI6ImFkbWluQGVtYWlsLmNvbSIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjU2MzU5NiwiZXhwIjoxNzcyNjQ5OTk2fQ.eLjbLk-n-15nwjSxrR74zxAExt_4asRs6Y3FoX_-syM
+
+{
+  "name": "Perfumes"
+}
+
+
+
+### Add Products
+POST http://localhost:3000/categories/28004175-4639-4517-a402-587a2133d5c6/products
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYWFjZGE1ZS0yOWFjLTRhMjAtODAzYi1mMmRhZDk0Y2Q4NWYiLCJlbWFpbCI6ImFkbWluQGVtYWlsLmNvbSIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjU2MzU5NiwiZXhwIjoxNzcyNjQ5OTk2fQ.eLjbLk-n-15nwjSxrR74zxAExt_4asRs6Y3FoX_-syM
+
+{
+  "urls": [
+    "https://shopee.com.br/Produto-A-i.123456.987654321",
+    "https://shopee.com.br/Produto-B-i.111111.222222333"
+  ]
+}
