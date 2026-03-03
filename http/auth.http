@@ -1,0 +1,27 @@
+### Register Admin
+POST http://localhost:3000/auth/register
+Content-Type: application/json
+x-admin-secret: uma_chave_muito_forte_aqui_123
+
+{
+  "name": "Admin",
+  "email": "admin@email.com",
+  "password": "123456"
+}
+
+###
+
+### Login
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@email.com",
+  "password": "123456"
+}
+
+###
+
+### Get Profile (rota protegida)
+GET http://localhost:3000/auth/me
+Authorization: Bearer {{token}}
