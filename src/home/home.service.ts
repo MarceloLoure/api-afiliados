@@ -1,140 +1,230 @@
-import { Injectable } from '@nestjs/common'
+import {
+  BadRequestException,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 
-type CacheEntry<T> = {
-  value: T
-  expiresAt: number
-}
-
 @Injectable()
-export class HomeService {
-  private readonly cache = new Map<string, CacheEntry<unknown>>()
-  private readonly ttlInMs = 5 * 60 * 1000
+export class HomeService implements OnModuleInit, OnModuleDestroy {
+  private readonly productsLimit = 20
+  private nextRefreshTimeout: NodeJS.Timeout | null = null
+  private dailyRefreshInterval: NodeJS.Timeout | null = null
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async getMenu(categoryIds?: string[]) {
-    const cacheKey = this.buildCacheKey('menu', categoryIds)
-    const fromCache = this.getCached(cacheKey)
-    if (fromCache) return fromCache
-
-    const categories = await this.prisma.category.findMany({
-      where: categoryIds?.length ? { id: { in: categoryIds } } : undefined,
-      select: {
-        id: true,
-        name: true,
-        _count: { select: { products: true } },
-      },
-      orderBy: { name: 'asc' },
-    })
-
-    const orderedCategories = this.orderCategories(categories, categoryIds).map((category) => ({
-      id: category.id,
-      name: category.name,
-      productCount: category._count.products,
-    }))
-
-    this.setCached(cacheKey, orderedCategories)
-    return orderedCategories
+  async onModuleInit() {
+    await this.refreshDailyCache()
+    this.scheduleDailyRefresh()
   }
 
-  async getHome(categoryIds?: string[], limit = 20) {
-    const safeLimit = Math.max(1, Math.min(20, limit))
-    const cacheKey = this.buildCacheKey('home', categoryIds, safeLimit)
-    const fromCache = this.getCached(cacheKey)
-    if (fromCache) return fromCache
+  onModuleDestroy() {
+    if (this.nextRefreshTimeout) clearTimeout(this.nextRefreshTimeout)
+    if (this.dailyRefreshInterval) clearInterval(this.dailyRefreshInterval)
+  }
+
+  async getHome() {
+    const cache = await this.getOrCreateTodayCache()
+
+    return {
+      menu: cache.menu,
+      sections: cache.sections,
+      limit: cache.limit,
+      cachedAt: cache.updatedAt.toISOString(),
+    }
+  }
+
+  async getMenu() {
+    const cache = await this.getOrCreateTodayCache()
+    return cache.menu
+  }
+
+  async updateCategoryOrder(categoryIds: string[]) {
+    const uniqueCategoryIds = [...new Set(categoryIds)]
 
     const categories = await this.prisma.category.findMany({
-      where: categoryIds?.length ? { id: { in: categoryIds } } : undefined,
-      select: {
-        id: true,
-        name: true,
-        _count: { select: { products: true } },
-        products: {
-          take: safeLimit,
-          orderBy: {
-            product: { createdAt: 'desc' },
-          },
+      where: { id: { in: uniqueCategoryIds } },
+      select: { id: true },
+    })
+
+    if (categories.length !== uniqueCategoryIds.length) {
+      throw new BadRequestException('Uma ou mais categorias informadas não existem')
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.homeCategory.deleteMany(),
+      this.prisma.homeCategory.createMany({
+        data: uniqueCategoryIds.map((categoryId, index) => ({
+          categoryId,
+          position: index + 1,
+        })),
+      }),
+    ])
+
+    await this.refreshDailyCache(true)
+
+    return this.prisma.homeCategory.findMany({
+      include: { category: { select: { id: true, name: true } } },
+      orderBy: { position: 'asc' },
+    })
+  }
+
+  async refreshDailyCache(force = false) {
+    const today = this.startOfDay(new Date())
+
+    if (!force) {
+      const existing = await this.prisma.homeCache.findUnique({
+        where: { cacheDate: today },
+      })
+      if (existing) return existing
+    }
+
+    const orderedCategories = await this.getOrderedHomeCategories()
+
+    const menu = orderedCategories.map((item) => ({
+      categoryId: item.category.id,
+      categoryName: item.category.name,
+      order: item.position,
+      productCount: item.category._count.products,
+    }))
+
+    const sections = orderedCategories.map((item) => ({
+      categoryId: item.category.id,
+      categoryName: item.category.name,
+      order: item.position,
+      products: item.category.products.map(({ product }) => product),
+    }))
+
+    return this.prisma.homeCache.upsert({
+      where: { cacheDate: today },
+      create: {
+        cacheDate: today,
+        menu,
+        sections,
+        limit: this.productsLimit,
+      },
+      update: {
+        menu,
+        sections,
+        limit: this.productsLimit,
+      },
+    })
+  }
+
+  private async getOrCreateTodayCache() {
+    const today = this.startOfDay(new Date())
+
+    const cache = await this.prisma.homeCache.findUnique({
+      where: { cacheDate: today },
+    })
+
+    if (cache) return cache
+    return this.refreshDailyCache()
+  }
+
+  private async getOrderedHomeCategories() {
+    const configured = await this.prisma.homeCategory.findMany({
+      include: {
+        category: {
           select: {
-            product: {
+            id: true,
+            name: true,
+            _count: { select: { products: true } },
+            products: {
+              take: this.productsLimit,
+              orderBy: { product: { createdAt: 'desc' } },
               select: {
-                id: true,
-                itemId: true,
-                name: true,
-                imageUrl: true,
-                price: true,
-                rating: true,
-                sales: true,
-                commissionRate: true,
-                shortLink: true,
-                affiliatedUrl: true,
+                product: {
+                  select: {
+                    id: true,
+                    itemId: true,
+                    name: true,
+                    imageUrl: true,
+                    price: true,
+                    rating: true,
+                    sales: true,
+                    commissionRate: true,
+                    shortLink: true,
+                    affiliatedUrl: true,
+                  },
+                },
               },
             },
           },
         },
       },
+      orderBy: { position: 'asc' },
+    })
+
+    if (configured.length) return configured
+
+    const categories = await this.prisma.category.findMany({
+      select: { id: true },
       orderBy: { name: 'asc' },
     })
 
-    const orderedCategories = this.orderCategories(categories, categoryIds)
+    if (!categories.length) return []
 
-    const payload = {
-      menu: orderedCategories.map((category) => ({
-        id: category.id,
-        name: category.name,
-        productCount: category._count.products,
-      })),
-      sections: orderedCategories.map((category) => ({
+    await this.prisma.homeCategory.createMany({
+      data: categories.map((category, index) => ({
         categoryId: category.id,
-        categoryName: category.name,
-        products: category.products.map(({ product }) => product),
+        position: index + 1,
       })),
-      limit: safeLimit,
-      cachedAt: new Date().toISOString(),
-    }
+      skipDuplicates: true,
+    })
 
-    this.setCached(cacheKey, payload)
-    return payload
-  }
-
-  private buildCacheKey(prefix: string, categoryIds?: string[], limit?: number) {
-    const ids = categoryIds?.length ? categoryIds.join(',') : 'all'
-    return `${prefix}:${ids}:${limit ?? 'default'}`
-  }
-
-  private getCached<T>(key: string): T | null {
-    const entry = this.cache.get(key)
-    if (!entry) return null
-
-    if (entry.expiresAt < Date.now()) {
-      this.cache.delete(key)
-      return null
-    }
-
-    return entry.value as T
-  }
-
-  private setCached<T>(key: string, value: T) {
-    this.cache.set(key, {
-      value,
-      expiresAt: Date.now() + this.ttlInMs,
+    return this.prisma.homeCategory.findMany({
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            _count: { select: { products: true } },
+            products: {
+              take: this.productsLimit,
+              orderBy: { product: { createdAt: 'desc' } },
+              select: {
+                product: {
+                  select: {
+                    id: true,
+                    itemId: true,
+                    name: true,
+                    imageUrl: true,
+                    price: true,
+                    rating: true,
+                    sales: true,
+                    commissionRate: true,
+                    shortLink: true,
+                    affiliatedUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { position: 'asc' },
     })
   }
 
-  private orderCategories<T extends { id: string }>(categories: T[], orderedIds?: string[]) {
-    if (!orderedIds?.length) return categories
+  private scheduleDailyRefresh() {
+    const now = new Date()
+    const nextMidnight = new Date(now)
+    nextMidnight.setHours(24, 0, 0, 0)
+    const delay = nextMidnight.getTime() - now.getTime()
 
-    const position = new Map(orderedIds.map((id, index) => [id, index]))
+    this.nextRefreshTimeout = setTimeout(async () => {
+      await this.refreshDailyCache(true)
+      this.dailyRefreshInterval = setInterval(async () => {
+        await this.refreshDailyCache(true)
+      }, 24 * 60 * 60 * 1000)
+    }, delay)
+  }
 
-    return [...categories].sort((a, b) => {
-      const aPos = position.get(a.id)
-      const bPos = position.get(b.id)
-
-      if (aPos === undefined && bPos === undefined) return 0
-      if (aPos === undefined) return 1
-      if (bPos === undefined) return -1
-
-      return aPos - bPos
-    })
+  private startOfDay(date: Date) {
+    const value = new Date(date)
+    value.setHours(0, 0, 0, 0)
+    return value
   }
 }

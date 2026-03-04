@@ -1,30 +1,31 @@
-import { Controller, Get, Query } from '@nestjs/common'
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common'
 import { HomeService } from './home.service'
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { UpdateHomeCategoriesDto } from './dto/update-home-categories.dto'
 
 @Controller('home')
 export class HomeController {
   constructor(private readonly homeService: HomeService) {}
 
   @Get()
-  getHome(
-    @Query('categoryIds') categoryIds?: string,
-    @Query('limit') limit = '20',
-  ) {
-    const parsedCategoryIds = categoryIds
-      ?.split(',')
-      .map((id) => id.trim())
-      .filter(Boolean)
-
-    return this.homeService.getHome(parsedCategoryIds, Number(limit))
+  getHome() {
+    return this.homeService.getHome()
   }
 
   @Get('menu')
-  getMenu(@Query('categoryIds') categoryIds?: string) {
-    const parsedCategoryIds = categoryIds
-      ?.split(',')
-      .map((id) => id.trim())
-      .filter(Boolean)
+  getMenu() {
+    return this.homeService.getMenu()
+  }
 
-    return this.homeService.getMenu(parsedCategoryIds)
+  @UseGuards(JwtAuthGuard)
+  @Patch('categories')
+  updateCategories(@Body() dto: UpdateHomeCategoriesDto) {
+    return this.homeService.updateCategoryOrder(dto.categoryIds)
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('refresh')
+  refreshNow() {
+    return this.homeService.refreshDailyCache(true)
   }
 }
