@@ -1,22 +1,39 @@
-### Create Category
-POST http://localhost:3000/categories
+### =============================================
+### CATEGORIES
+### =============================================
+
+@token = SEU_JWT_TOKEN_AQUI
+@baseUrl = http://localhost:3000
+
+### 1. Criar categoria
+# @name createCategory
+POST {{baseUrl}}/categories
 Content-Type: application/json
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYWFjZGE1ZS0yOWFjLTRhMjAtODAzYi1mMmRhZDk0Y2Q4NWYiLCJlbWFpbCI6ImFkbWluQGVtYWlsLmNvbSIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjU2MzU5NiwiZXhwIjoxNzcyNjQ5OTk2fQ.eLjbLk-n-15nwjSxrR74zxAExt_4asRs6Y3FoX_-syM
+Authorization: Bearer {{token}}
 
 {
-  "name": "Perfumes"
+  "name": "Eletrodomésticos"
 }
 
+###
 
+### 2. Listar todas
+GET {{baseUrl}}/categories
+Authorization: Bearer {{token}}
 
-### Add Products
-POST http://localhost:3000/categories/28004175-4639-4517-a402-587a2133d5c6/products
+###
+
+### 3. Buscar por ID (com produtos)
+GET {{baseUrl}}/categories/UUID_DA_CATEGORIA_AQUI
+Authorization: Bearer {{token}}
+
+###
+
+### 4. Atualizar nome
+PUT {{baseUrl}}/categories/UUID_DA_CATEGORIA_AQUI
 Content-Type: application/json
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYWFjZGE1ZS0yOWFjLTRhMjAtODAzYi1mMmRhZDk0Y2Q4NWYiLCJlbWFpbCI6ImFkbWluQGVtYWlsLmNvbSIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjU2MzU5NiwiZXhwIjoxNzcyNjQ5OTk2fQ.eLjbLk-n-15nwjSxrR74zxAExt_4asRs6Y3FoX_-syM
+Authorization: Bearer {{token}}
 
 {
-  "urls": [
-    "https://shopee.com.br/Produto-A-i.123456.987654321",
-    "https://shopee.com.br/Produto-B-i.111111.222222333"
-  ]
+  "name": "Eletrodomésticos - Lavanderia"
 }
