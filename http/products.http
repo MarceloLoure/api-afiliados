@@ -12,7 +12,7 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "urls": ["https://shopee.com.br/Produto-A-i.123456.987654321"],
+  "urls": ["https://shopee.com.br/Camiseta-Oversized-Texturizada-Casual-B%C3%A1sica-Lisa-Reta-i.546486172.42654183403"],
   "categoryId": "UUID_DA_CATEGORIA"
 }
 

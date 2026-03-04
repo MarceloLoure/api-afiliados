@@ -10,6 +10,7 @@ import {
   Param,
   Delete,
   ParseUUIDPipe,
+  BadRequestException,
 } from '@nestjs/common'
 import { CategoriesService } from './categories.service'
 import { CreateCategoryDto } from './dto/create-category.dto'
@@ -43,6 +44,11 @@ export class CategoriesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCategoryDto,
   ) {
+
+    if (!dto.name) {
+      throw new BadRequestException('O campo "name" é obrigatório para atualização')
+    }
+
     return this.categoriesService.update(id, dto.name)
   }
 
