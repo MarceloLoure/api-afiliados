@@ -1,0 +1,48 @@
+### =============================================
+### PRODUCTS
+### =============================================
+
+@token = SEU_JWT_TOKEN_AQUI
+@baseUrl = http://localhost:3000
+
+### 1. Criar produtos a partir de URLs Shopee
+POST {{baseUrl}}/products/from-urls
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "categoryId": "UUID_DA_CATEGORIA_AQUI",
+  "urls": [
+    "https://shopee.com.br/M%C3%A1quina-de-Lavar-Colormaq-12kg-i.781250043.20599662745"
+  ]
+}
+
+###
+
+### 2. Listar todos os produtos
+GET {{baseUrl}}/products
+Authorization: Bearer {{token}}
+
+###
+
+### 3. Filtrar por categoria
+GET {{baseUrl}}/products?categoryId=UUID_DA_CATEGORIA_AQUI
+Authorization: Bearer {{token}}
+
+###
+
+### 4. Buscar por nome
+GET {{baseUrl}}/products?search=maquina
+Authorization: Bearer {{token}}
+
+###
+
+### 5. Buscar por ID
+GET {{baseUrl}}/products/UUID_DO_PRODUTO_AQUI
+Authorization: Bearer {{token}}
+
+###
+
+### 6. Deletar produto
+DELETE {{baseUrl}}/products/UUID_DO_PRODUTO_AQUI
+Authorization: Bearer {{token}}

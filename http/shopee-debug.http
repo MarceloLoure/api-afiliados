@@ -1,0 +1,47 @@
+### =============================================
+### SHOPEE - Diagnóstico e Testes
+### =============================================
+
+@token = SEU_JWT_TOKEN_AQUI
+@baseUrl = http://localhost:3000
+
+### 1. Testar credenciais (sempre rodar primeiro)
+GET {{baseUrl}}/products/shopee/test-credentials
+Authorization: Bearer {{token}}
+
+###
+
+### 2. Buscar produto por itemId (máquina de lavar Colormaq)
+GET {{baseUrl}}/products/shopee/item/20599662745
+Authorization: Bearer {{token}}
+
+###
+
+### 3. Pesquisar por keyword
+GET {{baseUrl}}/products/shopee/search?q=maquina+de+lavar
+Authorization: Bearer {{token}}
+
+###
+
+### 4. Gerar shortlink de afiliado
+POST {{baseUrl}}/products/shopee/short-link
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "url": "https://shopee.com.br/M%C3%A1quina-de-Lavar-Colormaq-12kg-i.781250043.20599662745"
+}
+
+###
+
+### 5. Fluxo completo: URL → API Shopee → shortlink → banco
+POST {{baseUrl}}/products/from-urls
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "categoryId": "UUID_DA_CATEGORIA_AQUI",
+  "urls": [
+    "https://shopee.com.br/M%C3%A1quina-de-Lavar-Colormaq-12kg-i.781250043.20599662745"
+  ]
+}

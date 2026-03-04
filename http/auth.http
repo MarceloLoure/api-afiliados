@@ -1,4 +1,8 @@
-### Register Admin
+### =============================================
+### AUTH
+### =============================================
+
+### 1. Registrar Admin
 POST http://localhost:3000/auth/register
 Content-Type: application/json
 x-admin-secret: uma_chave_muito_forte_aqui_123
@@ -11,7 +15,8 @@ x-admin-secret: uma_chave_muito_forte_aqui_123
 
 ###
 
-### Login
+### 2. Login
+# @name login
 POST http://localhost:3000/auth/login
 Content-Type: application/json
 
@@ -22,13 +27,6 @@ Content-Type: application/json
 
 ###
 
-### Get Profile (rota protegida)
+### 3. Perfil
 GET http://localhost:3000/auth/me
-Authorization: Bearer {{token}}
-
-
-
-### Get Profile (rota protegida)
-GET http://localhost:3000/products/test-shopee/19899261419
-Authorization: Bearer GET http://localhost:3000/products/test-shopee/19899261419
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYWFjZGE1ZS0yOWFjLTRhMjAtODAzYi1mMmRhZDk0Y2Q4NWYiLCJlbWFpbCI6ImFkbWluQGVtYWlsLmNvbSIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjU2Nzg1OSwiZXhwIjoxNzcyNjU0MjU5fQ.dww7aVxXtdBowJ51f8GgOqzgEQ7MiS_Y-sYBxk5RtdQ
+Authorization: Bearer {{login.response.body.access_token}}
