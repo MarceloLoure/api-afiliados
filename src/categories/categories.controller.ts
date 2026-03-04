@@ -35,7 +35,11 @@ export class CategoriesController {
   @UseGuards(JwtAuthGuard)
   @Post()
   async create(@Body() dto: CreateCategoryDto) {
-    return this.categoriesService.create(dto.name)
+    if (!dto.name && !dto.slug) {
+      throw new BadRequestException('Informe ao menos "name" ou "slug" para criacao')
+    }
+
+    return this.categoriesService.create(dto.name, dto.slug)
   }
 
   @UseGuards(JwtAuthGuard)
@@ -44,12 +48,11 @@ export class CategoriesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCategoryDto,
   ) {
-
-    if (!dto.name) {
-      throw new BadRequestException('O campo "name" é obrigatório para atualização')
+    if (!dto.name && !dto.slug) {
+      throw new BadRequestException('Informe ao menos "name" ou "slug" para atualizacao')
     }
 
-    return this.categoriesService.update(id, dto.name)
+    return this.categoriesService.update(id, dto)
   }
 
   @UseGuards(JwtAuthGuard)

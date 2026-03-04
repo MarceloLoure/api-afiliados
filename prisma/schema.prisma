@@ -48,6 +48,7 @@ model Product {
 model Category {
   id           String            @id @default(uuid())
   name         String            @unique
+  slug         String            @unique
   products     ProductCategory[]
   homeCategory HomeCategory?
   createdAt    DateTime          @default(now())

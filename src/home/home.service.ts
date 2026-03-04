@@ -85,6 +85,7 @@ export class HomeService implements OnModuleInit, OnModuleDestroy {
     const menu = orderedCategories.map((item) => ({
       categoryId: item.category.id,
       categoryName: item.category.name,
+      categorySlug: item.category.slug,
       order: item.position,
       productCount: item.category._count.products,
     }))
@@ -130,6 +131,7 @@ export class HomeService implements OnModuleInit, OnModuleDestroy {
           select: {
             id: true,
             name: true,
+            slug: true,
             _count: { select: { products: true } },
             products: {
               take: this.productsLimit,
@@ -180,6 +182,7 @@ export class HomeService implements OnModuleInit, OnModuleDestroy {
           select: {
             id: true,
             name: true,
+            slug: true,
             _count: { select: { products: true } },
             products: {
               take: this.productsLimit,
