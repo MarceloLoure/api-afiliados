@@ -1,48 +1,68 @@
-### =============================================
-### PRODUCTS
-### =============================================
+### ============================================
+### PRODUCTS - Testes HTTP
+### ============================================
 
-@token = SEU_JWT_TOKEN_AQUI
 @baseUrl = http://localhost:3000
+@token = SEU_TOKEN_JWT_AQUI
+@productId = UUID_DO_PRODUTO
 
-### 1. Criar produtos a partir de URLs Shopee
+### 1. Criar a partir de URLs (protegido)
 POST {{baseUrl}}/products/from-urls
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "categoryId": "UUID_DA_CATEGORIA_AQUI",
-  "urls": [
-    "https://shopee.com.br/M%C3%A1quina-de-Lavar-Colormaq-12kg-i.781250043.20599662745"
-  ]
+  "urls": ["https://shopee.com.br/Produto-A-i.123456.987654321"],
+  "categoryId": "UUID_DA_CATEGORIA"
 }
 
 ###
 
-### 2. Listar todos os produtos
+### 2. Listar todos (público)
 GET {{baseUrl}}/products
-Authorization: Bearer {{token}}
 
 ###
 
-### 3. Filtrar por categoria
-GET {{baseUrl}}/products?categoryId=UUID_DA_CATEGORIA_AQUI
-Authorization: Bearer {{token}}
+### 3. Filtrar por categoria e paginar
+GET {{baseUrl}}/products?categoryId=UUID_DA_CATEGORIA&page=1&limit=10
 
 ###
 
 ### 4. Buscar por nome
-GET {{baseUrl}}/products?search=maquina
+GET {{baseUrl}}/products?search=perfume
+
+###
+
+### 5. Buscar por ID (público)
+GET {{baseUrl}}/products/{{productId}}
+
+###
+
+### 6. Atualizar (protegido)
+PATCH {{baseUrl}}/products/{{productId}}
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Nome Atualizado",
+  "price": 99.90
+}
+
+###
+
+### 7. Registrar clique / obter shortLink (público)
+GET {{baseUrl}}/products/{{productId}}/click
+
+###
+
+### 8. Estatísticas de cliques (protegido)
+GET {{baseUrl}}/products/{{productId}}/stats
 Authorization: Bearer {{token}}
 
 ###
 
-### 5. Buscar por ID
-GET {{baseUrl}}/products/UUID_DO_PRODUTO_AQUI
+### 9. Deletar (protegido)
+DELETE {{baseUrl}}/products/{{productId}}
 Authorization: Bearer {{token}}
 
 ###
-
-### 6. Deletar produto
-DELETE {{baseUrl}}/products/UUID_DO_PRODUTO_AQUI
-Authorization: Bearer {{token}}

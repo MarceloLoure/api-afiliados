@@ -1,32 +1,36 @@
-### =============================================
-### AUTH
-### =============================================
+### ============================================
+### AUTH - Testes HTTP
+### ============================================
+
+@baseUrl = http://localhost:3000
 
 ### 1. Registrar Admin
-POST http://localhost:3000/auth/register
+POST {{baseUrl}}/auth/register
 Content-Type: application/json
-x-admin-secret: uma_chave_muito_forte_aqui_123
+x-admin-secret: {{$dotenv ADMIN_SECRET}}
 
 {
-  "name": "Admin",
   "email": "admin@email.com",
-  "password": "123456"
+  "password": "SenhaForte123!"
 }
 
 ###
 
 ### 2. Login
 # @name login
-POST http://localhost:3000/auth/login
+POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
   "email": "admin@email.com",
-  "password": "123456"
+  "password": "SenhaForte123!"
 }
 
 ###
 
-### 3. Perfil
-GET http://localhost:3000/auth/me
+### 3. Ver perfil (protegido)
+GET {{baseUrl}}/auth/me
+Content-Type: application/json
 Authorization: Bearer {{login.response.body.access_token}}
+
+###

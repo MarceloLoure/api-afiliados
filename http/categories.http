@@ -1,39 +1,65 @@
-### =============================================
-### CATEGORIES
-### =============================================
+### ============================================
+### CATEGORIES - Testes HTTP
+### ============================================
 
-@token = SEU_JWT_TOKEN_AQUI
 @baseUrl = http://localhost:3000
+@token = SEU_TOKEN_JWT_AQUI
+@categoryId = UUID_DA_CATEGORIA
+@productId = UUID_DO_PRODUTO
 
-### 1. Criar categoria
-# @name createCategory
+### 1. Listar todas (público)
+GET {{baseUrl}}/categories
+
+###
+
+### 2. Buscar por ID (público)
+GET {{baseUrl}}/categories/{{categoryId}}
+
+###
+
+### 3. Criar (protegido)
 POST {{baseUrl}}/categories
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "name": "Eletrodomésticos"
+  "name": "Perfumes"
 }
 
 ###
 
-### 2. Listar todas
-GET {{baseUrl}}/categories
-Authorization: Bearer {{token}}
-
-###
-
-### 3. Buscar por ID (com produtos)
-GET {{baseUrl}}/categories/UUID_DA_CATEGORIA_AQUI
-Authorization: Bearer {{token}}
-
-###
-
-### 4. Atualizar nome
-PUT {{baseUrl}}/categories/UUID_DA_CATEGORIA_AQUI
+### 4. Atualizar (protegido)
+PATCH {{baseUrl}}/categories/{{categoryId}}
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "name": "Eletrodomésticos - Lavanderia"
+  "name": "Perfumes & Cosméticos"
 }
+
+###
+
+### 5. Adicionar produtos via URL Shopee (protegido)
+POST {{baseUrl}}/categories/{{categoryId}}/products
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "urls": [
+    "https://shopee.com.br/Produto-A-i.123456.987654321"
+  ]
+}
+
+###
+
+### 6. Remover produto de categoria (protegido)
+DELETE {{baseUrl}}/categories/{{categoryId}}/products/{{productId}}
+Authorization: Bearer {{token}}
+
+###
+
+### 7. Deletar categoria (protegido)
+DELETE {{baseUrl}}/categories/{{categoryId}}
+Authorization: Bearer {{token}}
+
+###

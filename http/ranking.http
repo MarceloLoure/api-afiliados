@@ -1,0 +1,40 @@
+### ============================================
+### RANKING & DASHBOARD - Testes HTTP
+### ============================================
+
+@baseUrl = http://localhost:3000
+@token = SEU_TOKEN_JWT_AQUI
+@categoryId = UUID_DA_CATEGORIA
+
+### 1. Dashboard geral (protegido)
+GET {{baseUrl}}/ranking/dashboard
+Authorization: Bearer {{token}}
+
+###
+
+### 2. Top produtos mais clicados (público)
+GET {{baseUrl}}/ranking/top-products
+
+###
+
+### 3. Top produtos - limite customizado
+GET {{baseUrl}}/ranking/top-products?limit=5
+
+###
+
+### 4. Top por categoria (público)
+GET {{baseUrl}}/ranking/category/{{categoryId}}
+
+###
+
+### 5. Relatório por categoria (protegido)
+GET {{baseUrl}}/ranking/categories-report
+Authorization: Bearer {{token}}
+
+###
+
+### 6. Estimativa de conversão (protegido)
+GET {{baseUrl}}/ranking/conversion-estimate
+Authorization: Bearer {{token}}
+
+###

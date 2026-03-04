@@ -1,16 +1,10 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -27,50 +21,67 @@ model User {
 }
 
 model Product {
-  id            String   @id @default(uuid())
-  itemId        String   @unique
-  name          String
-  imageUrl      String?
-  price         Float?
-  rating        Float?
-  sales         Int?
-  
+  id             String  @id @default(uuid())
+  itemId         String  @unique
+  name           String
+  imageUrl       String?
+  price          Float?
+  rating         Float?
+  sales          Int?
+  commissionRate Float?
+
   shopId        String
   shopName      String
 
   originalUrl   String?
   affiliatedUrl String?
+  shortLink     String?
 
-  categories    ProductCategory[]
-  dailyStats    ProductDailyStats[]
+  categories ProductCategory[]
+  dailyStats ProductDailyStats[]
+  clicks     ClickLog[]
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Category {
   id        String            @id @default(uuid())
   name      String            @unique
   products  ProductCategory[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
 }
 
 model ProductCategory {
   productId  String
   categoryId String
 
-  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@id([productId, categoryId])
 }
 
 model ProductDailyStats {
-  id        String   @id @default(uuid())
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        String  @id @default(uuid())
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId String
 
-  rating    Float?
-  sales     Int?
+  rating Float?
+  sales  Int?
+
+  createdAt DateTime @default(now())
+}
+
+model ClickLog {
+  id        String  @id @default(uuid())
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+
+  ip        String?
+  userAgent String?
+  referer   String?
 
   createdAt DateTime @default(now())
 }
