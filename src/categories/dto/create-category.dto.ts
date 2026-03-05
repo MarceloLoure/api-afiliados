@@ -5,4 +5,8 @@ export class CreateCategoryDto {
   @IsNotEmpty()
   @MinLength(2)
   name: string
+
+  @IsString()
+  @IsNotEmpty()
+  slug: string
 }

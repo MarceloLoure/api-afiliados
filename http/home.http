@@ -1,0 +1,45 @@
+### ============================================
+### HOME / MENU - Testes HTTP
+### ============================================
+
+@baseUrl = http://localhost:3000
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxZjU0ZDg4NC0xNzk1LTRkZGUtYTg2OS04MWU2YmNmODY4ZjciLCJlbWFpbCI6ImFkbWluQGVtYWlsLmNvbSIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjY0MjIyMCwiZXhwIjoxNzcyNzI4NjIwfQ.fmN9Jp1DjB4zH6dk171OeU7HQiZYHU5kEIYWSjIhSn0
+@categoryId1 = UUID_DA_CATEGORIA_1
+@categoryId2 = UUID_DA_CATEGORIA_2
+@categoryId3 = UUID_DA_CATEGORIA_3
+
+### 1. Home completo (publico)
+GET {{baseUrl}}/home
+
+###
+
+### 2. Somente menu (publico)
+GET {{baseUrl}}/home/menu
+
+###
+
+### 3. Atualizar ordem das categorias da home (protegido)
+PATCH {{baseUrl}}/home/categories
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "categoryIds": [
+    "{{categoryId1}}",
+    "{{categoryId2}}",
+    "{{categoryId3}}"
+  ]
+}
+
+###
+
+### 4. Forcar refresh do cache diario da home (protegido)
+POST {{baseUrl}}/home/refresh
+Authorization: Bearer {{token}}
+
+###
+
+### 5. Validar nova ordem no menu (publico)
+GET {{baseUrl}}/home/menu
+
+###

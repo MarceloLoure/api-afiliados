@@ -6,4 +6,9 @@ export class UpdateCategoryDto {
   @IsString()
   @MinLength(2)
   name?: string
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  slug?: string
 }

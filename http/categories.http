@@ -7,12 +7,12 @@
 @categoryId = UUID_DA_CATEGORIA
 @productId = UUID_DO_PRODUTO
 
-### 1. Listar todas (público)
+### 1. Listar todas (publico)
 GET {{baseUrl}}/categories
 
 ###
 
-### 2. Buscar por ID (público)
+### 2. Buscar por ID (publico)
 GET {{baseUrl}}/categories/{{categoryId}}
 
 ###
@@ -23,7 +23,8 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "name": "Perfumes"
+  "name": "Perfumes",
+  "slug": "perfumes"
 }
 
 ###
@@ -34,7 +35,8 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "name": "Perfumes & Cosméticos"
+  "name": "Perfumes e Cosmeticos",
+  "slug": "perfumes-e-cosmeticos"
 }
 
 ###
