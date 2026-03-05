@@ -1,817 +1,459 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # =============================================================================
-# Script de aplicação das alterações — Fases 3, 4 e 5
-# Sistema de Afiliados Shopee — NestJS + Prisma + Supabase
-#
-# CORREÇÃO do erro P3006/P1014:
-#   Aplica o SQL diretamente no banco via Node.js (pg), depois usa
-#   "prisma migrate resolve --applied" para registrar no histórico
-#   sem passar pela shadow database. Não precisa de psql instalado.
+# apply-changes.sh
+# Aplica todas as mudanças de refatoração no projeto api-afiliados:
+#   1. POST /products/:id/click  (era GET)
+#   2. ShopeeController com prefixo /shopee
+#   3. ShopeeModule atualizado
+#   4. RankingCronService (cron diário de validação + ranking)
+#   5. RankingModule com ScheduleModule
+#   6. RankingController com endpoint de trigger manual
+#   7. Prisma schema com rankingScore no model Product
+#   8. Migration SQL para rankingScore
+#   9. http/shopee.http (novo)
+#  10. http/users.http (novo)
+#  11. http/products.http (atualizado: click vira POST)
+#  12. http/ranking.http (atualizado: + cron/run)
+#  13. Remove shopee-debug.http (substituído)
+#  14. Instala @nestjs/schedule
 # =============================================================================
 
-set -e
+set -e  # para o script se qualquer comando falhar
 
+# ---------------------------------------------------------------------------
+# Cores para output
+# ---------------------------------------------------------------------------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # sem cor
 
-log()    { echo -e "${GREEN}[✔]${NC} $1"; }
-warn()   { echo -e "${YELLOW}[!]${NC} $1"; }
-error()  { echo -e "${RED}[✘]${NC} $1"; exit 1; }
-header() { echo -e "\n${BLUE}══════════════════════════════════════${NC}"; echo -e "${BLUE}  $1${NC}"; echo -e "${BLUE}══════════════════════════════════════${NC}"; }
+ok()   { echo -e "${GREEN}  ✔ $1${NC}"; }
+info() { echo -e "${CYAN}  → $1${NC}"; }
+warn() { echo -e "${YELLOW}  ⚠ $1${NC}"; }
+fail() { echo -e "${RED}  ✘ $1${NC}"; exit 1; }
+step() { echo -e "\n${BOLD}${CYAN}[ $1 ]${NC}"; }
 
-# Verifica raiz do projeto
-if [ ! -f "package.json" ] || [ ! -d "prisma" ] || [ ! -d "src" ]; then
-  error "Execute este script na raiz do projeto NestJS (onde ficam src/ e prisma/)"
+# ---------------------------------------------------------------------------
+# Garante que o script rode a partir da raiz do projeto
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+if [[ ! -f "package.json" ]]; then
+  fail "Execute este script na raiz do projeto (onde está o package.json)"
 fi
 
-header "FASE 3-5 — Aplicando alterações"
+# ---------------------------------------------------------------------------
+# Backup automático com timestamp
+# ---------------------------------------------------------------------------
+step "1/14 — Backup dos arquivos que serão alterados"
 
-# =============================================================================
-# 1. PRISMA SCHEMA
-# =============================================================================
-header "1/8 — Atualizando prisma/schema.prisma"
+BACKUP_DIR=".backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
 
-cat > prisma/schema.prisma << 'PRISMA_EOF'
-generator client {
-  provider = "prisma-client-js"
+backup_file() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    local dir="$BACKUP_DIR/$(dirname "$file")"
+    mkdir -p "$dir"
+    cp "$file" "$dir/$(basename "$file")"
+    info "Backup: $file"
+  fi
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+backup_file "src/products/products.controller.ts"
+backup_file "src/shopee/shopee.module.ts"
+backup_file "src/ranking/ranking.module.ts"
+backup_file "src/ranking/ranking.controller.ts"
+backup_file "prisma/schema.prisma"
+backup_file "http/products.http"
+backup_file "http/ranking.http"
+backup_file "http/shopee-debug.http"
 
-enum Role {
-  ADMIN
-}
+ok "Backup salvo em: $BACKUP_DIR"
 
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  role      Role     @default(ADMIN)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
+# ---------------------------------------------------------------------------
+# 1. products.controller.ts — GET :id/click → POST :id/click
+# ---------------------------------------------------------------------------
+step "2/14 — products.controller.ts: GET :id/click → POST :id/click"
 
-model Product {
-  id             String  @id @default(uuid())
-  itemId         String  @unique
-  name           String
-  imageUrl       String?
-  price          Float?
-  rating         Float?
-  sales          Int?
-  commissionRate Float?
+PRODUCTS_CTRL="src/products/products.controller.ts"
+[[ -f "$PRODUCTS_CTRL" ]] || fail "Arquivo não encontrado: $PRODUCTS_CTRL"
 
-  shopId        String
-  shopName      String
-
-  originalUrl   String?
-  affiliatedUrl String?
-  shortLink     String?
-
-  categories ProductCategory[]
-  dailyStats ProductDailyStats[]
-  clicks     ClickLog[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Category {
-  id        String            @id @default(uuid())
-  name      String            @unique
-  products  ProductCategory[]
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-}
-
-model ProductCategory {
-  productId  String
-  categoryId String
-
-  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-
-  @@id([productId, categoryId])
-}
-
-model ProductDailyStats {
-  id        String  @id @default(uuid())
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  productId String
-
-  rating Float?
-  sales  Int?
-
-  createdAt DateTime @default(now())
-}
-
-model ClickLog {
-  id        String  @id @default(uuid())
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  productId String
-
-  ip        String?
-  userAgent String?
-  referer   String?
-
-  createdAt DateTime @default(now())
-}
-PRISMA_EOF
-
-log "prisma/schema.prisma atualizado"
-
-# =============================================================================
-# 2. MIGRATION SQL
-# =============================================================================
-header "2/8 — Criando pasta e arquivo migration SQL"
-
-MIGRATION_NAME="20260303000001_add_click_log_and_commission"
-MIGRATION_DIR="prisma/migrations/${MIGRATION_NAME}"
-mkdir -p "$MIGRATION_DIR"
-
-cat > "$MIGRATION_DIR/migration.sql" << 'SQL_EOF'
--- AlterTable: adiciona commissionRate e shortLink em Product
-ALTER TABLE "Product"
-  ADD COLUMN IF NOT EXISTS "commissionRate" DOUBLE PRECISION,
-  ADD COLUMN IF NOT EXISTS "shortLink"      TEXT;
-
--- AlterTable: adiciona timestamps em Category
-ALTER TABLE "Category"
-  ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
-
--- CreateTable: ClickLog
-CREATE TABLE IF NOT EXISTS "ClickLog" (
-    "id"        TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
-    "ip"        TEXT,
-    "userAgent" TEXT,
-    "referer"   TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "ClickLog_pkey" PRIMARY KEY ("id")
-);
-
--- AddForeignKey (seguro se já existir)
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'ClickLog_productId_fkey'
-  ) THEN
-    ALTER TABLE "ClickLog"
-      ADD CONSTRAINT "ClickLog_productId_fkey"
-      FOREIGN KEY ("productId") REFERENCES "Product"("id")
-      ON DELETE CASCADE ON UPDATE CASCADE;
-  END IF;
-END $$;
-SQL_EOF
-
-log "Migration SQL criada em $MIGRATION_DIR"
-
-# =============================================================================
-# Carrega .env
-# =============================================================================
-if [ -f ".env" ]; then
-  set -a
-  source .env
-  set +a
+# Adiciona Post ao import se não existir
+if ! grep -q "Post," "$PRODUCTS_CTRL"; then
+  sed -i "s/  Controller,/  Controller,\n  Post,/" "$PRODUCTS_CTRL"
+  info "Adicionado 'Post' ao import de @nestjs/common"
 fi
 
-if [ -z "$DATABASE_URL" ]; then
-  error "DATABASE_URL não encontrada. Verifique seu .env"
+# Troca @Get(':id/click') por @Post(':id/click')
+sed -i "s/@Get(':id\/click')/@Post(':id\/click')/" "$PRODUCTS_CTRL"
+
+# Verifica se a mudança foi aplicada
+if grep -q "@Post(':id/click')" "$PRODUCTS_CTRL"; then
+  ok "Rota de click alterada para POST"
+else
+  fail "Falha ao alterar rota de click para POST"
 fi
 
-# =============================================================================
-# 3. APLICA SQL VIA NODE.JS (sem precisar de psql)
-# =============================================================================
-header "3/8 — Aplicando SQL direto no banco via Node.js"
+# ---------------------------------------------------------------------------
+# 2. shopee.controller.ts — novo arquivo
+# ---------------------------------------------------------------------------
+step "3/14 — Criando src/shopee/shopee.controller.ts"
 
-warn "Instalando 'pg' temporariamente para executar o SQL..."
-npm install pg --save-dev --silent 2>/dev/null || true
+cat > src/shopee/shopee.controller.ts << 'TYPESCRIPT'
+// src/shopee/shopee.controller.ts
 
-warn "Executando migration SQL no banco..."
-node - << 'NODE_EOF'
-const { Client } = require('pg');
-const fs = require('fs');
-const path = require('path');
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
+import { ShopeeAffiliateService } from './shopee-affiliate.service'
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 
-const sql = fs.readFileSync(
-  path.join('prisma', 'migrations', '20260303000001_add_click_log_and_commission', 'migration.sql'),
-  'utf8'
-);
+@UseGuards(JwtAuthGuard)
+@Controller('shopee')
+export class ShopeeController {
+  constructor(private readonly shopeeAffiliateService: ShopeeAffiliateService) {}
 
-const client = new Client({ connectionString: process.env.DATABASE_URL });
+  /**
+   * GET /shopee/test-credentials
+   * Valida se SHOPEE_APP_ID e SHOPEE_APP_SECRET estão corretos.
+   */
+  @Get('test-credentials')
+  testCredentials() {
+    return this.shopeeAffiliateService.testCredentials()
+  }
 
-async function run() {
-  await client.connect();
-  console.log('  Conectado ao banco.');
-  try {
-    await client.query(sql);
-    console.log('  SQL aplicado com sucesso!');
-  } catch (err) {
-    console.error('  Erro ao aplicar SQL:', err.message);
-    process.exit(1);
-  } finally {
-    await client.end();
+  /**
+   * GET /shopee/item/:itemId
+   * Busca um produto na API Shopee Afiliados pelo itemId.
+   */
+  @Get('item/:itemId')
+  getProductByItemId(@Param('itemId') itemId: string) {
+    return this.shopeeAffiliateService.getProductByItemId(itemId)
+  }
+
+  /**
+   * GET /shopee/search?q=keyword&page=1&limit=10
+   * Pesquisa produtos na API Shopee Afiliados por palavra-chave.
+   */
+  @Get('search')
+  searchProducts(
+    @Query('q') keyword: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+  ) {
+    return this.shopeeAffiliateService.searchProducts(
+      keyword,
+      Number(page),
+      Number(limit),
+    )
+  }
+
+  /**
+   * POST /shopee/short-link
+   * Gera um shortlink de afiliado a partir de uma URL original da Shopee.
+   */
+  @Post('short-link')
+  generateShortLink(@Body('url') url: string) {
+    return this.shopeeAffiliateService.generateShortLink(url)
   }
 }
+TYPESCRIPT
 
-run();
-NODE_EOF
+ok "shopee.controller.ts criado"
 
-log "SQL aplicado no banco com sucesso"
+# ---------------------------------------------------------------------------
+# 3. shopee.module.ts — registra o novo controller
+# ---------------------------------------------------------------------------
+step "4/14 — Atualizando src/shopee/shopee.module.ts"
 
-# =============================================================================
-# Registra a migration no histórico do Prisma sem shadow database
-# =============================================================================
-header "4/8 — Registrando migration no histórico Prisma"
-
-warn "Rodando: npx prisma migrate resolve --applied $MIGRATION_NAME"
-npx prisma migrate resolve --applied "$MIGRATION_NAME"
-log "Migration '$MIGRATION_NAME' registrada no histórico"
-
-# =============================================================================
-# 5. CATEGORIES
-# =============================================================================
-header "5/8 — Atualizando módulo Categories"
-
-mkdir -p src/categories/dto
-
-cat > src/categories/categories.module.ts << 'EOF'
-// src/categories/categories.module.ts
+cat > src/shopee/shopee.module.ts << 'TYPESCRIPT'
+// src/shopee/shopee.module.ts
 
 import { Module } from '@nestjs/common'
-import { CategoriesController } from './categories.controller'
-import { CategoriesService } from './categories.service'
-import { ShopeeModule } from '../shopee/shopee.module'
+import { ShopeeController } from './shopee.controller'
+import { ShopeeService } from './shopee.service'
+import { ShopeeAffiliateService } from './shopee-affiliate.service'
 
 @Module({
-  imports: [ShopeeModule],
-  controllers: [CategoriesController],
-  providers: [CategoriesService],
+  controllers: [ShopeeController],
+  providers: [ShopeeService, ShopeeAffiliateService],
+  exports: [ShopeeService, ShopeeAffiliateService],
 })
-export class CategoriesModule {}
-EOF
-log "src/categories/categories.module.ts"
+export class ShopeeModule {}
+TYPESCRIPT
 
-cat > src/categories/categories.controller.ts << 'EOF'
-// src/categories/categories.controller.ts
+ok "shopee.module.ts atualizado"
 
-import {
-  Controller,
-  Post,
-  Body,
-  UseGuards,
-  Get,
-  Patch,
-  Param,
-  Delete,
-  ParseUUIDPipe,
-} from '@nestjs/common'
-import { CategoriesService } from './categories.service'
-import { CreateCategoryDto } from './dto/create-category.dto'
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { UpdateCategoryDto } from './dto/update-category.dto'
-import { AddProductsToCategoryDto } from './dto/add-products.dto'
+# ---------------------------------------------------------------------------
+# 4. ranking-cron.service.ts — novo arquivo
+# ---------------------------------------------------------------------------
+step "5/14 — Criando src/ranking/ranking-cron.service.ts"
 
-@Controller('categories')
-export class CategoriesController {
-  constructor(private categoriesService: CategoriesService) {}
+cat > src/ranking/ranking-cron.service.ts << 'TYPESCRIPT'
+// src/ranking/ranking-cron.service.ts
+//
+// CRON DE RANKING — roda automaticamente às 03:00 para:
+// 1. Validar todos os produtos contra a API Shopee (preço, sales, rating)
+// 2. Calcular score de ranking baseado em cliques + vendas
+// 3. Persistir rankingScore no produto
+// 4. Salvar snapshot diário em ProductDailyStats
 
-  @Get()
-  async findAll() {
-    return this.categoriesService.findAll()
-  }
-
-  @Get(':id')
-  async findById(@Param('id', ParseUUIDPipe) id: string) {
-    return this.categoriesService.findById(id)
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Post()
-  async create(@Body() dto: CreateCategoryDto) {
-    return this.categoriesService.create(dto.name)
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Patch(':id')
-  async update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateCategoryDto,
-  ) {
-    return this.categoriesService.update(id, dto.name)
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Delete(':id')
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.categoriesService.remove(id)
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Post(':id/products')
-  async addProducts(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AddProductsToCategoryDto,
-  ) {
-    return this.categoriesService.addProducts(id, dto.urls)
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Delete(':id/products/:productId')
-  async removeProduct(
-    @Param('id', ParseUUIDPipe) categoryId: string,
-    @Param('productId', ParseUUIDPipe) productId: string,
-  ) {
-    return this.categoriesService.removeProduct(categoryId, productId)
-  }
-}
-EOF
-log "src/categories/categories.controller.ts"
-
-cat > src/categories/categories.service.ts << 'EOF'
-// src/categories/categories.service.ts
-
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
+import { Cron, CronExpression } from '@nestjs/schedule'
 import { PrismaService } from '../prisma/prisma.service'
-import { ShopeeService } from '../shopee/shopee.service'
 import { ShopeeAffiliateService } from '../shopee/shopee-affiliate.service'
 
-@Injectable()
-export class CategoriesService {
-  constructor(
-    private prisma: PrismaService,
-    private shopeeService: ShopeeService,
-    private shopeeAffiliateService: ShopeeAffiliateService,
-  ) {}
-
-  async create(name: string) {
-    return this.prisma.category.create({ data: { name } })
-  }
-
-  async findAll() {
-    return this.prisma.category.findMany({
-      include: { _count: { select: { products: true } } },
-      orderBy: { createdAt: 'desc' },
-    })
-  }
-
-  async findById(id: string) {
-    const category = await this.prisma.category.findUnique({
-      where: { id },
-      include: { products: { include: { product: true } } },
-    })
-    if (!category) throw new NotFoundException('Categoria não encontrada')
-    return category
-  }
-
-  async update(id: string, name: string) {
-    await this.findById(id)
-    return this.prisma.category.update({ where: { id }, data: { name } })
-  }
-
-  async remove(id: string) {
-    await this.findById(id)
-    await this.prisma.category.delete({ where: { id } })
-    return { message: 'Categoria removida com sucesso' }
-  }
-
-  async addProducts(categoryId: string, urls: string[]) {
-    const category = await this.prisma.category.findUnique({ where: { id: categoryId } })
-    if (!category) throw new NotFoundException('Categoria não encontrada')
-
-    const results: { url: string; status: string; productId?: string; error?: string }[] = []
-
-    for (const url of urls) {
-      try {
-        const ids = this.shopeeService.extractIds(url)
-        if (!ids) {
-          results.push({ url, status: 'erro', error: 'URL inválida' })
-          continue
-        }
-
-        let product = await this.prisma.product.findUnique({ where: { itemId: ids.itemId } })
-
-        if (!product) {
-          const shopeeProduct = await this.shopeeAffiliateService.getProductByItemId(ids.itemId)
-          if (!shopeeProduct) {
-            results.push({ url, status: 'erro', error: 'Produto não encontrado na Shopee' })
-            continue
-          }
-
-          const shortLink = await this.shopeeAffiliateService.generateShortLink(
-            shopeeProduct.offerLink || url,
-          )
-
-          product = await this.prisma.product.create({
-            data: {
-              itemId: String(shopeeProduct.itemId),
-              name: shopeeProduct.productName,
-              imageUrl: shopeeProduct.imageUrl,
-              price: Number(shopeeProduct.priceMin),
-              rating: Number(shopeeProduct.ratingStar),
-              sales: shopeeProduct.sales,
-              commissionRate: Number(shopeeProduct.commissionRate ?? 0),
-              shopId: String(shopeeProduct.shopId),
-              shopName: shopeeProduct.shopName,
-              originalUrl: url,
-              affiliatedUrl: shopeeProduct.offerLink,
-              shortLink: shortLink ?? shopeeProduct.offerLink,
-            },
-          })
-        }
-
-        await this.prisma.productCategory.upsert({
-          where: { productId_categoryId: { productId: product.id, categoryId } },
-          update: {},
-          create: { productId: product.id, categoryId },
-        })
-
-        results.push({ url, status: 'ok', productId: product.id })
-      } catch (err: any) {
-        results.push({ url, status: 'erro', error: err?.message ?? 'Erro desconhecido' })
-      }
-    }
-
-    return { message: 'Processamento concluído', results }
-  }
-
-  async removeProduct(categoryId: string, productId: string) {
-    await this.findById(categoryId)
-    const link = await this.prisma.productCategory.findUnique({
-      where: { productId_categoryId: { productId, categoryId } },
-    })
-    if (!link) throw new NotFoundException('Produto não encontrado nesta categoria')
-    await this.prisma.productCategory.delete({
-      where: { productId_categoryId: { productId, categoryId } },
-    })
-    return { message: 'Produto removido da categoria' }
-  }
+/**
+ * Pesos do score de ranking (devem somar 1.0).
+ * Ajuste conforme a estratégia do negócio.
+ */
+const RANKING_WEIGHTS = {
+  clicks:         0.4,  // 40% — engajamento do usuário no site
+  sales:          0.4,  // 40% — prova social (vendas na Shopee)
+  commissionRate: 0.1,  // 10% — produtos mais lucrativos ficam mais visíveis
+  rating:         0.1,  // 10% — qualidade do produto
 }
-EOF
-log "src/categories/categories.service.ts"
-
-# =============================================================================
-# 6. PRODUCTS
-# =============================================================================
-header "6/8 — Atualizando módulo Products"
-
-mkdir -p src/products/dto
-
-cat > src/products/dto/update-product.dto.ts << 'EOF'
-// src/products/dto/update-product.dto.ts
-
-import { IsOptional, IsString, IsNumber } from 'class-validator'
-
-export class UpdateProductDto {
-  @IsOptional()
-  @IsString()
-  name?: string
-
-  @IsOptional()
-  @IsString()
-  imageUrl?: string
-
-  @IsOptional()
-  @IsNumber()
-  price?: number
-
-  @IsOptional()
-  @IsString()
-  shortLink?: string
-
-  @IsOptional()
-  @IsString()
-  affiliatedUrl?: string
-}
-EOF
-log "src/products/dto/update-product.dto.ts"
-
-cat > src/products/products.controller.ts << 'EOF'
-// src/products/products.controller.ts
-
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Param,
-  Body,
-  Query,
-  ParseUUIDPipe,
-  UseGuards,
-  Req,
-  Ip,
-  Headers,
-} from '@nestjs/common'
-import { Request } from 'express'
-import { ProductsService } from './products.service'
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard'
-import { CreateProductsFromUrlsDto } from './dto/create-product.dto'
-import { UpdateProductDto } from './dto/update-product.dto'
-
-@Controller('products')
-export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
-
-  @UseGuards(JwtAuthGuard)
-  @Post('from-urls')
-  createFromUrls(@Body() dto: CreateProductsFromUrlsDto) {
-    return this.productsService.createFromUrls(dto.urls, dto.categoryId)
-  }
-
-  @Get()
-  findAll(
-    @Query('categoryId') categoryId?: string,
-    @Query('search') search?: string,
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-  ) {
-    return this.productsService.findAll({
-      categoryId,
-      search,
-      page: Number(page),
-      limit: Number(limit),
-    })
-  }
-
-  @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.productsService.findOne(id)
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Patch(':id')
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateProductDto,
-  ) {
-    return this.productsService.update(id, dto)
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Delete(':id')
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.productsService.remove(id)
-  }
-
-  @Get(':id/click')
-  trackClick(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Req() req: Request,
-    @Ip() ip: string,
-    @Headers('user-agent') userAgent: string,
-    @Headers('referer') referer: string,
-  ) {
-    return this.productsService.trackClick(id, { ip, userAgent, referer })
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get(':id/stats')
-  getStats(@Param('id', ParseUUIDPipe) id: string) {
-    return this.productsService.getProductStats(id)
-  }
-}
-EOF
-log "src/products/products.controller.ts"
-
-cat > src/products/products.service.ts << 'EOF'
-// src/products/products.service.ts
-
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common'
-import { PrismaService } from '../prisma/prisma.service'
-import { ShopeeService } from '../shopee/shopee.service'
-import { ShopeeAffiliateService } from '../shopee/shopee-affiliate.service'
-import { UpdateProductDto } from './dto/update-product.dto'
 
 @Injectable()
-export class ProductsService {
+export class RankingCronService {
+  private readonly logger = new Logger(RankingCronService.name)
+
   constructor(
-    private prisma: PrismaService,
-    private shopeeService: ShopeeService,
-    private shopeeAffiliateService: ShopeeAffiliateService,
+    private readonly prisma: PrismaService,
+    private readonly shopeeAffiliate: ShopeeAffiliateService,
   ) {}
 
-  async createFromUrls(urls: string[], categoryId: string) {
-    const category = await this.prisma.category.findUnique({ where: { id: categoryId } })
-    if (!category) throw new BadRequestException(`Categoria não encontrada: ${categoryId}`)
+  /**
+   * Roda todo dia às 03:00.
+   * Valida produtos, atualiza dados e recalcula ranking.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async runDailyRankingCron() {
+    this.logger.log('🕒 [CRON] Iniciando validação e ranking diário de produtos...')
 
-    const created = []
-    const skipped = []
-    const errors = []
-
-    for (const url of urls) {
-      try {
-        const ids = this.shopeeService.extractIds(url)
-        if (!ids) { errors.push({ url, error: 'URL inválida' }); continue }
-
-        const existing = await this.prisma.product.findUnique({ where: { itemId: ids.itemId } })
-
-        if (existing) {
-          await this.prisma.productCategory.upsert({
-            where: { productId_categoryId: { productId: existing.id, categoryId } },
-            update: {},
-            create: { productId: existing.id, categoryId },
-          })
-          skipped.push({ url, productId: existing.id })
-          continue
-        }
-
-        const shopeeProduct = await this.shopeeAffiliateService.getProductByItemId(ids.itemId)
-        if (!shopeeProduct) { errors.push({ url, error: 'Produto não encontrado na API Shopee' }); continue }
-
-        const shortLink = await this.shopeeAffiliateService.generateShortLink(
-          shopeeProduct.offerLink || url,
-        )
-
-        const product = await this.prisma.product.create({
-          data: {
-            itemId: String(shopeeProduct.itemId),
-            name: shopeeProduct.productName,
-            imageUrl: shopeeProduct.imageUrl,
-            price: Number(shopeeProduct.priceMin),
-            rating: Number(shopeeProduct.ratingStar),
-            sales: shopeeProduct.sales,
-            commissionRate: Number(shopeeProduct.commissionRate ?? 0),
-            shopId: String(shopeeProduct.shopId),
-            shopName: shopeeProduct.shopName,
-            originalUrl: url,
-            affiliatedUrl: shopeeProduct.offerLink,
-            shortLink: shortLink ?? shopeeProduct.offerLink,
-            categories: { create: [{ categoryId }] },
-          },
-        })
-
-        created.push(product)
-      } catch (err: any) {
-        errors.push({ url, error: err?.message ?? 'Erro desconhecido' })
-      }
-    }
-
-    return { created, skipped, errors }
-  }
-
-  async findAll(params: { categoryId?: string; search?: string; page: number; limit: number }) {
-    const { categoryId, search, page, limit } = params
-    const skip = (page - 1) * limit
-    const where: any = {}
-
-    if (categoryId) where.categories = { some: { categoryId } }
-    if (search) where.name = { contains: search, mode: 'insensitive' }
-
-    const [products, total] = await Promise.all([
-      this.prisma.product.findMany({
-        where,
-        skip,
-        take: limit,
-        include: {
-          categories: { include: { category: true } },
-          _count: { select: { clicks: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.product.count({ where }),
-    ])
-
-    return {
-      data: products,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
-    }
-  }
-
-  async findOne(id: string) {
-    const product = await this.prisma.product.findUnique({
-      where: { id },
-      include: {
-        categories: { include: { category: true } },
+    const products = await this.prisma.product.findMany({
+      select: {
+        id: true,
+        itemId: true,
+        name: true,
+        commissionRate: true,
         _count: { select: { clicks: true } },
       },
     })
-    if (!product) throw new NotFoundException('Produto não encontrado')
-    return product
-  }
 
-  async update(id: string, dto: UpdateProductDto) {
-    await this.findOne(id)
-    return this.prisma.product.update({ where: { id }, data: dto })
-  }
+    this.logger.log(`📦 Total de produtos para processar: ${products.length}`)
 
-  async remove(id: string) {
-    await this.findOne(id)
-    await this.prisma.product.delete({ where: { id } })
-    return { message: 'Produto removido com sucesso' }
-  }
+    let updated = 0
+    let notFound = 0
+    let errors = 0
 
-  async trackClick(
-    productId: string,
-    meta: { ip?: string; userAgent?: string; referer?: string },
-  ) {
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { shortLink: true, affiliatedUrl: true, name: true },
-    })
-    if (!product) throw new NotFoundException('Produto não encontrado')
+    for (const product of products) {
+      try {
+        // 1. Busca dados atualizados na API Shopee
+        const shopeeData = await this.shopeeAffiliate.getProductByItemId(product.itemId)
 
-    await this.prisma.clickLog.create({
-      data: { productId, ip: meta.ip, userAgent: meta.userAgent, referer: meta.referer },
-    })
+        if (!shopeeData) {
+          this.logger.warn(
+            `⚠️ Produto não encontrado na Shopee: ${product.itemId} — "${product.name}"`,
+          )
+          notFound++
+          continue
+        }
 
-    return {
-      message: 'Clique registrado',
-      product: product.name,
-      redirectUrl: product.shortLink ?? product.affiliatedUrl,
-    }
-  }
+        // 2. Atualiza campos dinâmicos no banco
+        await this.prisma.product.update({
+          where: { id: product.id },
+          data: {
+            price:          Number(shopeeData.priceMin),
+            rating:         Number(shopeeData.ratingStar ?? 0),
+            sales:          Number(shopeeData.sales ?? 0),
+            commissionRate: Number(shopeeData.commissionRate ?? 0),
+            affiliatedUrl:  shopeeData.offerLink ?? undefined,
+          },
+        })
 
-  async getProductStats(productId: string) {
-    await this.findOne(productId)
+        // 3. Salva snapshot diário
+        await this.prisma.productDailyStats.create({
+          data: {
+            productId: product.id,
+            rating:    Number(shopeeData.ratingStar ?? 0),
+            sales:     Number(shopeeData.sales ?? 0),
+          },
+        })
 
-    const [totalClicks, clicksByDay] = await Promise.all([
-      this.prisma.clickLog.count({ where: { productId } }),
-      this.prisma.clickLog.groupBy({
-        by: ['createdAt'],
-        where: { productId },
-        _count: { id: true },
-        orderBy: { createdAt: 'desc' },
-      }),
-    ])
-
-    const clicksPerDay: Record<string, number> = {}
-    for (const row of clicksByDay) {
-      const day = row.createdAt.toISOString().split('T')[0]
-      clicksPerDay[day] = (clicksPerDay[day] ?? 0) + row._count.id
+        updated++
+      } catch (err: any) {
+        this.logger.error(
+          `❌ Erro ao processar produto ${product.itemId}: ${err?.message}`,
+        )
+        errors++
+      }
     }
 
-    return { productId, totalClicks, clicksPerDay }
+    this.logger.log(
+      `✅ [CRON] Validação concluída: ${updated} atualizados | ${notFound} não encontrados | ${errors} erros`,
+    )
+
+    // 4. Recalcula e persiste o score de ranking
+    await this.computeAndPersistRanking()
+  }
+
+  /**
+   * Calcula o score normalizado de cada produto e persiste como rankingScore.
+   * Score é usado para ordenação automática na home e listagens.
+   */
+  private async computeAndPersistRanking() {
+    this.logger.log('📊 Calculando e persistindo scores de ranking...')
+
+    const products = await this.prisma.product.findMany({
+      select: {
+        id: true,
+        name: true,
+        sales: true,
+        rating: true,
+        commissionRate: true,
+        _count: { select: { clicks: true } },
+      },
+    })
+
+    if (products.length === 0) return
+
+    // Normalização: máximo de cada métrica para escalar 0-1
+    const maxClicks         = Math.max(...products.map(p => p._count.clicks), 1)
+    const maxSales          = Math.max(...products.map(p => p.sales ?? 0), 1)
+    const maxCommissionRate = Math.max(...products.map(p => p.commissionRate ?? 0), 1)
+    const maxRating         = Math.max(...products.map(p => p.rating ?? 0), 1)
+
+    const ranked = products.map(p => {
+      const score =
+        (p._count.clicks / maxClicks)         * RANKING_WEIGHTS.clicks +
+        ((p.sales ?? 0) / maxSales)            * RANKING_WEIGHTS.sales +
+        ((p.commissionRate ?? 0) / maxCommissionRate) * RANKING_WEIGHTS.commissionRate +
+        ((p.rating ?? 0) / maxRating)          * RANKING_WEIGHTS.rating
+
+      return {
+        id:    p.id,
+        name:  p.name,
+        score: Math.round(score * 10000) / 10000, // 4 casas decimais
+      }
+    })
+
+    // Persiste o rankingScore em lote
+    await Promise.all(
+      ranked.map(p =>
+        this.prisma.product.update({
+          where: { id: p.id },
+          data: { rankingScore: p.score },
+        }),
+      ),
+    )
+
+    // Loga top 20
+    const top20 = [...ranked].sort((a, b) => b.score - a.score).slice(0, 20)
+    this.logger.log('🏆 Top 20 produtos por ranking score:')
+    top20.forEach((p, i) => {
+      this.logger.log(`  ${String(i + 1).padStart(2, '0')}. [${p.score}] ${p.name}`)
+    })
+
+    this.logger.log(`✅ rankingScore persistido em ${ranked.length} produtos`)
+  }
+
+  /**
+   * Trigger manual via endpoint admin.
+   * Permite rodar o cron sob demanda sem esperar 03:00.
+   */
+  async runManually() {
+    this.logger.log('🔧 [CRON MANUAL] Trigger via endpoint admin')
+    await this.runDailyRankingCron()
+    return { message: 'Cron de ranking executado manualmente com sucesso' }
   }
 }
-EOF
-log "src/products/products.service.ts"
+TYPESCRIPT
 
-# =============================================================================
-# 7. RANKING
-# =============================================================================
-header "7/8 — Criando módulo Ranking"
+ok "ranking-cron.service.ts criado"
 
-mkdir -p src/ranking
+# ---------------------------------------------------------------------------
+# 5. ranking.module.ts — adiciona ScheduleModule e RankingCronService
+# ---------------------------------------------------------------------------
+step "6/14 — Atualizando src/ranking/ranking.module.ts"
 
-cat > src/ranking/ranking.module.ts << 'EOF'
+cat > src/ranking/ranking.module.ts << 'TYPESCRIPT'
 // src/ranking/ranking.module.ts
 
 import { Module } from '@nestjs/common'
+import { ScheduleModule } from '@nestjs/schedule'
 import { RankingController } from './ranking.controller'
 import { RankingService } from './ranking.service'
+import { RankingCronService } from './ranking-cron.service'
+import { ShopeeModule } from '../shopee/shopee.module'
 
 @Module({
+  imports: [
+    ScheduleModule.forRoot(),
+    ShopeeModule,
+  ],
   controllers: [RankingController],
-  providers: [RankingService],
+  providers: [RankingService, RankingCronService],
+  exports: [RankingCronService],
 })
 export class RankingModule {}
-EOF
-log "src/ranking/ranking.module.ts"
+TYPESCRIPT
 
-cat > src/ranking/ranking.controller.ts << 'EOF'
+ok "ranking.module.ts atualizado"
+
+# ---------------------------------------------------------------------------
+# 6. ranking.controller.ts — adiciona POST cron/run
+# ---------------------------------------------------------------------------
+step "7/14 — Atualizando src/ranking/ranking.controller.ts"
+
+cat > src/ranking/ranking.controller.ts << 'TYPESCRIPT'
 // src/ranking/ranking.controller.ts
 
 import {
   Controller,
   Get,
+  Post,
   Param,
   Query,
   ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common'
 import { RankingService } from './ranking.service'
+import { RankingCronService } from './ranking-cron.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 
 @Controller('ranking')
 export class RankingController {
-  constructor(private rankingService: RankingService) {}
+  constructor(
+    private rankingService: RankingService,
+    private rankingCronService: RankingCronService,
+  ) {}
 
+  /** GET /ranking/dashboard — visão geral para admin. Protegido. */
   @UseGuards(JwtAuthGuard)
   @Get('dashboard')
   getDashboard() {
     return this.rankingService.getDashboard()
   }
 
+  /** GET /ranking/top-products?limit=10 — top por cliques. Público. */
   @Get('top-products')
   getMostClicked(@Query('limit') limit = '10') {
     return this.rankingService.getMostClickedProducts(Number(limit))
   }
 
+  /** GET /ranking/category/:id?limit=10 — top de uma categoria. Público. */
   @Get('category/:id')
   getMostClickedByCategory(
     @Param('id', ParseUUIDPipe) id: string,
@@ -820,311 +462,171 @@ export class RankingController {
     return this.rankingService.getMostClickedByCategory(id, Number(limit))
   }
 
+  /** GET /ranking/categories-report — relatório por categoria. Protegido. */
   @UseGuards(JwtAuthGuard)
   @Get('categories-report')
   getCategoryReport() {
     return this.rankingService.getCategoryReport()
   }
 
+  /** GET /ranking/conversion-estimate — estimativa de ganhos. Protegido. */
   @UseGuards(JwtAuthGuard)
   @Get('conversion-estimate')
   getConversionEstimate() {
     return this.rankingService.getConversionEstimate()
   }
-}
-EOF
-log "src/ranking/ranking.controller.ts"
 
-cat > src/ranking/ranking.service.ts << 'EOF'
-// src/ranking/ranking.service.ts
-
-import { Injectable } from '@nestjs/common'
-import { PrismaService } from '../prisma/prisma.service'
-
-@Injectable()
-export class RankingService {
-  constructor(private prisma: PrismaService) {}
-
-  async getMostClickedProducts(limit = 10) {
-    const products = await this.prisma.product.findMany({
-      include: {
-        _count: { select: { clicks: true } },
-        categories: { include: { category: true } },
-      },
-      orderBy: { clicks: { _count: 'desc' } },
-      take: limit,
-    })
-
-    return products.map((p) => ({
-      id: p.id,
-      itemId: p.itemId,
-      name: p.name,
-      imageUrl: p.imageUrl,
-      price: p.price,
-      shortLink: p.shortLink,
-      affiliatedUrl: p.affiliatedUrl,
-      commissionRate: p.commissionRate,
-      totalClicks: p._count.clicks,
-      categories: p.categories.map((c) => c.category.name),
-    }))
-  }
-
-  async getMostClickedByCategory(categoryId: string, limit = 10) {
-    const products = await this.prisma.product.findMany({
-      where: { categories: { some: { categoryId } } },
-      include: { _count: { select: { clicks: true } } },
-      orderBy: { clicks: { _count: 'desc' } },
-      take: limit,
-    })
-
-    return products.map((p) => ({
-      id: p.id,
-      name: p.name,
-      imageUrl: p.imageUrl,
-      price: p.price,
-      shortLink: p.shortLink,
-      totalClicks: p._count.clicks,
-    }))
-  }
-
-  async getCategoryReport() {
-    const categories = await this.prisma.category.findMany({
-      include: {
-        products: {
-          include: {
-            product: { include: { _count: { select: { clicks: true } } } },
-          },
-        },
-      },
-    })
-
-    return categories.map((cat) => {
-      const products = cat.products.map((pc) => ({
-        id: pc.product.id,
-        name: pc.product.name,
-        price: pc.product.price,
-        totalClicks: pc.product._count.clicks,
-        commissionRate: pc.product.commissionRate,
-        estimatedCommission:
-          pc.product.price && pc.product.commissionRate
-            ? parseFloat(((pc.product.price * pc.product.commissionRate) / 100).toFixed(2))
-            : null,
-      }))
-
-      return {
-        categoryId: cat.id,
-        categoryName: cat.name,
-        totalProducts: products.length,
-        totalClicks: products.reduce((acc, p) => acc + p.totalClicks, 0),
-        products,
-      }
-    })
-  }
-
-  async getDashboard() {
-    const [totalProducts, totalCategories, totalClicks, topProducts, recentClicks] =
-      await Promise.all([
-        this.prisma.product.count(),
-        this.prisma.category.count(),
-        this.prisma.clickLog.count(),
-        this.getMostClickedProducts(5),
-        this.prisma.clickLog.findMany({
-          take: 10,
-          orderBy: { createdAt: 'desc' },
-          include: {
-            product: { select: { name: true, imageUrl: true, shortLink: true } },
-          },
-        }),
-      ])
-
-    const sevenDaysAgo = new Date()
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-
-    const clicksByDay = await this.prisma.clickLog.groupBy({
-      by: ['createdAt'],
-      where: { createdAt: { gte: sevenDaysAgo } },
-      _count: { id: true },
-      orderBy: { createdAt: 'asc' },
-    })
-
-    const clicksPerDay: Record<string, number> = {}
-    for (const row of clicksByDay) {
-      const day = row.createdAt.toISOString().split('T')[0]
-      clicksPerDay[day] = (clicksPerDay[day] ?? 0) + row._count.id
-    }
-
-    const productsWithCommission = await this.prisma.product.findMany({
-      select: { price: true, commissionRate: true },
-      where: { price: { not: null }, commissionRate: { not: null } },
-    })
-
-    const estimatedTotalCommission = productsWithCommission.reduce(
-      (acc, p) => acc + (p.price! * p.commissionRate!) / 100,
-      0,
-    )
-
-    return {
-      totalProducts,
-      totalCategories,
-      totalClicks,
-      estimatedTotalCommission: parseFloat(estimatedTotalCommission.toFixed(2)),
-      clicksLast7Days: clicksPerDay,
-      topProducts,
-      recentClicks: recentClicks.map((c) => ({
-        productName: c.product.name,
-        shortLink: c.product.shortLink,
-        ip: c.ip,
-        clickedAt: c.createdAt,
-      })),
-    }
-  }
-
-  async getConversionEstimate() {
-    const CONVERSION_RATE = 0.02
-
-    const products = await this.prisma.product.findMany({
-      include: { _count: { select: { clicks: true } } },
-      where: { commissionRate: { not: null }, price: { not: null } },
-    })
-
-    return products
-      .filter((p) => p._count.clicks > 0)
-      .map((p) => {
-        const estimatedSales = Math.floor(p._count.clicks * CONVERSION_RATE)
-        const estimatedRevenue = (estimatedSales * p.price! * p.commissionRate!) / 100
-        return {
-          productId: p.id,
-          name: p.name,
-          totalClicks: p._count.clicks,
-          estimatedConversionRate: `${(CONVERSION_RATE * 100).toFixed(0)}%`,
-          estimatedSales,
-          commissionRate: `${p.commissionRate}%`,
-          estimatedRevenueFromCommission: parseFloat(estimatedRevenue.toFixed(2)),
-        }
-      })
-      .sort((a, b) => b.estimatedRevenueFromCommission - a.estimatedRevenueFromCommission)
+  /**
+   * POST /ranking/cron/run
+   * Dispara o cron de validação e ranking manualmente. Protegido.
+   * Útil para testes e reprocessamentos sem esperar as 03:00.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('cron/run')
+  runCronManually() {
+    return this.rankingCronService.runManually()
   }
 }
-EOF
-log "src/ranking/ranking.service.ts"
+TYPESCRIPT
 
-# =============================================================================
-# 8. HTTP TEST FILES + PRISMA GENERATE
-# =============================================================================
-header "8/8 — Arquivos HTTP e prisma generate"
+ok "ranking.controller.ts atualizado"
+
+# ---------------------------------------------------------------------------
+# 7. prisma/schema.prisma — adiciona rankingScore ao model Product
+# ---------------------------------------------------------------------------
+step "8/14 — Adicionando rankingScore ao prisma/schema.prisma"
+
+SCHEMA="prisma/schema.prisma"
+[[ -f "$SCHEMA" ]] || fail "Arquivo não encontrado: $SCHEMA"
+
+if grep -q "rankingScore" "$SCHEMA"; then
+  warn "rankingScore já existe no schema — pulando"
+else
+  # Insere rankingScore logo após shortLink no model Product
+  sed -i '/shortLink     String?/a\  rankingScore  Float?   @default(0)' "$SCHEMA"
+  ok "Campo rankingScore adicionado ao model Product"
+fi
+
+# ---------------------------------------------------------------------------
+# 8. Migration SQL para rankingScore
+# ---------------------------------------------------------------------------
+step "9/14 — Criando migration SQL para rankingScore"
+
+MIGRATION_DIR="prisma/migrations/$(date +%Y%m%d%H%M%S)_add_ranking_score"
+mkdir -p "$MIGRATION_DIR"
+
+cat > "$MIGRATION_DIR/migration.sql" << 'SQL'
+-- AlterTable: adiciona rankingScore ao model Product
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "rankingScore" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- Index para ordenação eficiente por score na home e listagens
+CREATE INDEX IF NOT EXISTS "Product_rankingScore_idx" ON "Product"("rankingScore" DESC);
+SQL
+
+ok "Migration criada em: $MIGRATION_DIR/migration.sql"
+
+# ---------------------------------------------------------------------------
+# 9. http/shopee.http — novo arquivo
+# ---------------------------------------------------------------------------
+step "10/14 — Criando http/shopee.http"
 
 mkdir -p http
 
-cat > http/auth.http << 'EOF'
+cat > http/shopee.http << 'HTTP'
 ### ============================================
-### AUTH - Testes HTTP
-### ============================================
-
-@baseUrl = http://localhost:3000
-
-### 1. Registrar Admin
-POST {{baseUrl}}/auth/register
-Content-Type: application/json
-x-admin-secret: {{$dotenv ADMIN_SECRET}}
-
-{
-  "email": "admin@email.com",
-  "password": "SenhaForte123!"
-}
-
-###
-
-### 2. Login
-# @name login
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
-
-{
-  "email": "admin@email.com",
-  "password": "SenhaForte123!"
-}
-
-###
-
-### 3. Ver perfil (protegido)
-GET {{baseUrl}}/auth/me
-Content-Type: application/json
-Authorization: Bearer {{login.response.body.access_token}}
-
-###
-EOF
-log "http/auth.http"
-
-cat > http/categories.http << 'EOF'
-### ============================================
-### CATEGORIES - Testes HTTP
+### SHOPEE - Testes HTTP
 ### ============================================
 
 @baseUrl = http://localhost:3000
 @token = SEU_TOKEN_JWT_AQUI
-@categoryId = UUID_DA_CATEGORIA
-@productId = UUID_DO_PRODUTO
 
-### 1. Listar todas (público)
-GET {{baseUrl}}/categories
-
-###
-
-### 2. Buscar por ID (público)
-GET {{baseUrl}}/categories/{{categoryId}}
-
-###
-
-### 3. Criar (protegido)
-POST {{baseUrl}}/categories
-Content-Type: application/json
+### 1. Testar credenciais Shopee (sempre rodar primeiro)
+GET {{baseUrl}}/shopee/test-credentials
 Authorization: Bearer {{token}}
 
+###
+
+### 2. Buscar produto por itemId
+GET {{baseUrl}}/shopee/item/20599662745
+Authorization: Bearer {{token}}
+
+###
+
+### 3. Pesquisar por keyword (paginado)
+GET {{baseUrl}}/shopee/search?q=maquina+de+lavar&page=1&limit=5
+Authorization: Bearer {{token}}
+
+###
+
+### 4. Gerar shortlink de afiliado a partir de URL original
+POST {{baseUrl}}/shopee/short-link
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
 {
-  "name": "Perfumes"
+  "url": "https://shopee.com.br/M%C3%A1quina-de-Lavar-Colormaq-12kg-i.781250043.20599662745"
+}
+
+###
+HTTP
+
+ok "http/shopee.http criado"
+
+# ---------------------------------------------------------------------------
+# 10. http/users.http — novo arquivo
+# ---------------------------------------------------------------------------
+step "11/14 — Criando http/users.http"
+
+cat > http/users.http << 'HTTP'
+### ============================================
+### USERS - Testes HTTP
+### ============================================
+### Nota: criação de usuário é feita via /auth/register
+### Este módulo expõe endpoints de gestão para o admin.
+
+@baseUrl = http://localhost:3000
+@token = SEU_TOKEN_JWT_AQUI
+@userId = UUID_DO_USUARIO
+
+### 1. Listar todos os usuários (protegido)
+GET {{baseUrl}}/users
+Authorization: Bearer {{token}}
+
+###
+
+### 2. Buscar usuário por ID (protegido)
+GET {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{token}}
+
+###
+
+### 3. Atualizar e-mail ou senha (protegido)
+PATCH {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "email": "novo@email.com",
+  "password": "NovaSenhaForte456!"
 }
 
 ###
 
-### 4. Atualizar (protegido)
-PATCH {{baseUrl}}/categories/{{categoryId}}
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "name": "Perfumes & Cosméticos"
-}
-
-###
-
-### 5. Adicionar produtos via URL Shopee (protegido)
-POST {{baseUrl}}/categories/{{categoryId}}/products
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "urls": [
-    "https://shopee.com.br/Produto-A-i.123456.987654321"
-  ]
-}
-
-###
-
-### 6. Remover produto de categoria (protegido)
-DELETE {{baseUrl}}/categories/{{categoryId}}/products/{{productId}}
+### 4. Deletar usuário (protegido)
+DELETE {{baseUrl}}/users/{{userId}}
 Authorization: Bearer {{token}}
 
 ###
+HTTP
 
-### 7. Deletar categoria (protegido)
-DELETE {{baseUrl}}/categories/{{categoryId}}
-Authorization: Bearer {{token}}
+ok "http/users.http criado"
 
-###
-EOF
-log "http/categories.http"
+# ---------------------------------------------------------------------------
+# 11. http/products.http — atualiza click para POST
+# ---------------------------------------------------------------------------
+step "12/14 — Atualizando http/products.http (click → POST)"
 
-cat > http/products.http << 'EOF'
+cat > http/products.http << 'HTTP'
 ### ============================================
 ### PRODUCTS - Testes HTTP
 ### ============================================
@@ -1133,13 +635,13 @@ cat > http/products.http << 'EOF'
 @token = SEU_TOKEN_JWT_AQUI
 @productId = UUID_DO_PRODUTO
 
-### 1. Criar a partir de URLs (protegido)
+### 1. Criar a partir de URLs Shopee (protegido)
 POST {{baseUrl}}/products/from-urls
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "urls": ["https://shopee.com.br/Produto-A-i.123456.987654321"],
+  "urls": ["https://shopee.com.br/Camiseta-Oversized-Texturizada-Casual-B%C3%A1sica-Lisa-Reta-i.546486172.42654183403"],
   "categoryId": "UUID_DA_CATEGORIA"
 }
 
@@ -1177,8 +679,9 @@ Authorization: Bearer {{token}}
 
 ###
 
-### 7. Registrar clique / obter shortLink (público)
-GET {{baseUrl}}/products/{{productId}}/click
+### 7. Registrar clique — retorna redirectUrl para afiliado (público)
+### O front chama isso ao usuário clicar e redireciona para redirectUrl
+POST {{baseUrl}}/products/{{productId}}/click
 
 ###
 
@@ -1193,10 +696,16 @@ DELETE {{baseUrl}}/products/{{productId}}
 Authorization: Bearer {{token}}
 
 ###
-EOF
-log "http/products.http"
+HTTP
 
-cat > http/ranking.http << 'EOF'
+ok "http/products.http atualizado"
+
+# ---------------------------------------------------------------------------
+# 12. http/ranking.http — adiciona cron/run
+# ---------------------------------------------------------------------------
+step "13/14 — Atualizando http/ranking.http (+ cron/run)"
+
+cat > http/ranking.http << 'HTTP'
 ### ============================================
 ### RANKING & DASHBOARD - Testes HTTP
 ### ============================================
@@ -1216,7 +725,7 @@ GET {{baseUrl}}/ranking/top-products
 
 ###
 
-### 3. Top produtos - limite customizado
+### 3. Top produtos — limite customizado
 GET {{baseUrl}}/ranking/top-products?limit=5
 
 ###
@@ -1232,41 +741,88 @@ Authorization: Bearer {{token}}
 
 ###
 
-### 6. Estimativa de conversão (protegido)
+### 6. Estimativa de conversão por comissão (protegido)
 GET {{baseUrl}}/ranking/conversion-estimate
 Authorization: Bearer {{token}}
 
 ###
-EOF
-log "http/ranking.http"
 
-warn "Rodando: npx prisma generate"
-npx prisma generate
-log "Prisma Client gerado com sucesso"
+### 7. Disparar cron de ranking manualmente (protegido)
+### Valida todos os produtos na API Shopee, atualiza dados e recalcula scores
+POST {{baseUrl}}/ranking/cron/run
+Authorization: Bearer {{token}}
 
-# =============================================================================
-# DONE
-# =============================================================================
+###
+HTTP
+
+ok "http/ranking.http atualizado"
+
+# ---------------------------------------------------------------------------
+# 13. Remove shopee-debug.http (substituído por shopee.http)
+# ---------------------------------------------------------------------------
+step "14/14 — Removendo http/shopee-debug.http (substituído por shopee.http)"
+
+if [[ -f "http/shopee-debug.http" ]]; then
+  rm http/shopee-debug.http
+  ok "http/shopee-debug.http removido"
+else
+  warn "http/shopee-debug.http não encontrado — nada a remover"
+fi
+
+# ---------------------------------------------------------------------------
+# Instala @nestjs/schedule
+# ---------------------------------------------------------------------------
+step "Instalando dependência @nestjs/schedule"
+
+if grep -q '"@nestjs/schedule"' package.json; then
+  warn "@nestjs/schedule já está no package.json — pulando instalação"
+else
+  info "Rodando: npm install @nestjs/schedule"
+  npm install @nestjs/schedule
+  ok "@nestjs/schedule instalado"
+fi
+
+# ---------------------------------------------------------------------------
+# Aplica a migration no banco
+# ---------------------------------------------------------------------------
+step "Aplicando migration no banco (prisma migrate deploy)"
+
+if [[ -z "${DATABASE_URL}" ]]; then
+  warn "DATABASE_URL não definida no ambiente — pulando migrate deploy"
+  warn "Execute manualmente: npx prisma migrate deploy && npx prisma generate"
+else
+  npx prisma migrate deploy
+  npx prisma generate
+  ok "Migration aplicada e Prisma client regenerado"
+fi
+
+# ---------------------------------------------------------------------------
+# Resumo final
+# ---------------------------------------------------------------------------
 echo ""
-echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   ✔  Todas as alterações foram aplicadas!            ║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
+echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${GREEN}  ✅  Todas as mudanças aplicadas com sucesso!${NC}"
+echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════${NC}"
 echo ""
-echo -e "Arquivos alterados/criados:"
-echo -e "  ${BLUE}prisma/schema.prisma${NC}"
-echo -e "  ${BLUE}prisma/migrations/${MIGRATION_NAME}/${NC}"
-echo -e "  ${BLUE}src/categories/categories.module.ts${NC}"
-echo -e "  ${BLUE}src/categories/categories.controller.ts${NC}"
-echo -e "  ${BLUE}src/categories/categories.service.ts${NC}"
-echo -e "  ${BLUE}src/products/products.controller.ts${NC}"
-echo -e "  ${BLUE}src/products/products.service.ts${NC}"
-echo -e "  ${BLUE}src/products/dto/update-product.dto.ts${NC}"
-echo -e "  ${BLUE}src/ranking/ranking.module.ts${NC}"
-echo -e "  ${BLUE}src/ranking/ranking.controller.ts${NC}"
-echo -e "  ${BLUE}src/ranking/ranking.service.ts${NC}"
-echo -e "  ${BLUE}http/auth.http${NC}"
-echo -e "  ${BLUE}http/categories.http${NC}"
-echo -e "  ${BLUE}http/products.http${NC}"
-echo -e "  ${BLUE}http/ranking.http${NC}"
+echo -e "${BOLD}Arquivos alterados:${NC}"
+echo "  src/products/products.controller.ts   — click: GET → POST"
+echo "  src/shopee/shopee.controller.ts        — NOVO (prefixo /shopee)"
+echo "  src/shopee/shopee.module.ts            — registra ShopeeController"
+echo "  src/ranking/ranking-cron.service.ts   — NOVO (cron 03:00 + score)"
+echo "  src/ranking/ranking.module.ts          — ScheduleModule + CronService"
+echo "  src/ranking/ranking.controller.ts      — POST /ranking/cron/run"
+echo "  prisma/schema.prisma                   — rankingScore Float no Product"
+echo "  prisma/migrations/*_add_ranking_score  — NOVA migration SQL"
+echo "  http/shopee.http                       — NOVO"
+echo "  http/users.http                        — NOVO"
+echo "  http/products.http                     — click atualizado para POST"
+echo "  http/ranking.http                      — cron/run adicionado"
+echo "  http/shopee-debug.http                 — REMOVIDO"
 echo ""
-echo -e "Para iniciar: ${YELLOW}npm run start:dev${NC}"
+echo -e "${BOLD}Backup dos originais em:${NC} ${YELLOW}$BACKUP_DIR/${NC}"
+echo ""
+echo -e "${BOLD}Próximos passos manuais (se DATABASE_URL não estava definida):${NC}"
+echo "  npx prisma migrate deploy"
+echo "  npx prisma generate"
+echo "  npm run start:dev"
+echo ""

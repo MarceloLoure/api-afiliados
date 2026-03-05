@@ -3,37 +3,29 @@
 import {
   Controller,
   Get,
-  Post,
   Param,
   Query,
   ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common'
 import { RankingService } from './ranking.service'
-import { RankingCronService } from './ranking-cron.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 
 @Controller('ranking')
 export class RankingController {
-  constructor(
-    private rankingService: RankingService,
-    private rankingCronService: RankingCronService,
-  ) {}
+  constructor(private rankingService: RankingService) {}
 
-  /** GET /ranking/dashboard — visão geral para admin. Protegido. */
   @UseGuards(JwtAuthGuard)
   @Get('dashboard')
   getDashboard() {
     return this.rankingService.getDashboard()
   }
 
-  /** GET /ranking/top-products?limit=10 — top por cliques. Público. */
   @Get('top-products')
   getMostClicked(@Query('limit') limit = '10') {
     return this.rankingService.getMostClickedProducts(Number(limit))
   }
 
-  /** GET /ranking/category/:id?limit=10 — top de uma categoria. Público. */
   @Get('category/:id')
   getMostClickedByCategory(
     @Param('id', ParseUUIDPipe) id: string,
@@ -42,28 +34,15 @@ export class RankingController {
     return this.rankingService.getMostClickedByCategory(id, Number(limit))
   }
 
-  /** GET /ranking/categories-report — relatório por categoria. Protegido. */
   @UseGuards(JwtAuthGuard)
   @Get('categories-report')
   getCategoryReport() {
     return this.rankingService.getCategoryReport()
   }
 
-  /** GET /ranking/conversion-estimate — estimativa de ganhos. Protegido. */
   @UseGuards(JwtAuthGuard)
   @Get('conversion-estimate')
   getConversionEstimate() {
     return this.rankingService.getConversionEstimate()
-  }
-
-  /**
-   * POST /ranking/cron/run
-   * Dispara o cron de validação e ranking manualmente. Protegido.
-   * Útil para testes e reprocessamentos sem esperar as 03:00.
-   */
-  @UseGuards(JwtAuthGuard)
-  @Post('cron/run')
-  runCronManually() {
-    return this.rankingCronService.runManually()
   }
 }

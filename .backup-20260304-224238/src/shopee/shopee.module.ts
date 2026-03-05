@@ -1,13 +1,9 @@
-// src/shopee/shopee.module.ts
-
 import { Module } from '@nestjs/common'
-import { ShopeeController } from './shopee.controller'
 import { ShopeeService } from './shopee.service'
 import { ShopeeAffiliateService } from './shopee-affiliate.service'
 
 @Module({
-  controllers: [ShopeeController],
   providers: [ShopeeService, ShopeeAffiliateService],
-  exports: [ShopeeService, ShopeeAffiliateService],
+  exports: [ShopeeService, ShopeeAffiliateService], // 👈 importante
 })
 export class ShopeeModule {}

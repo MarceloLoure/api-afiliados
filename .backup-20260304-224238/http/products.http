@@ -6,13 +6,13 @@
 @token = SEU_TOKEN_JWT_AQUI
 @productId = UUID_DO_PRODUTO
 
-### 1. Criar a partir de URLs Shopee (protegido)
+### 1. Criar a partir de URLs (protegido)
 POST {{baseUrl}}/products/from-urls
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "urls": ["https://shopee.com.br/Camiseta-Oversized-Texturizada-Casual-B%C3%A1sica-Lisa-Reta-i.546486172.42654183403"],
+  "urls": ["https://shopee.com.br/Produto-A-i.123456.987654321"],
   "categoryId": "UUID_DA_CATEGORIA"
 }
 
@@ -50,9 +50,8 @@ Authorization: Bearer {{token}}
 
 ###
 
-### 7. Registrar clique — retorna redirectUrl para afiliado (público)
-### O front chama isso ao usuário clicar e redireciona para redirectUrl
-POST {{baseUrl}}/products/{{productId}}/click
+### 7. Registrar clique / obter shortLink (público)
+GET {{baseUrl}}/products/{{productId}}/click
 
 ###
 

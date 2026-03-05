@@ -1,0 +1,39 @@
+### ============================================
+### USERS - Testes HTTP
+### ============================================
+### Nota: criação de usuário é feita via /auth/register
+### Este módulo expõe endpoints de gestão para o admin.
+
+@baseUrl = http://localhost:3000
+@token = SEU_TOKEN_JWT_AQUI
+@userId = UUID_DO_USUARIO
+
+### 1. Listar todos os usuários (protegido)
+GET {{baseUrl}}/users
+Authorization: Bearer {{token}}
+
+###
+
+### 2. Buscar usuário por ID (protegido)
+GET {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{token}}
+
+###
+
+### 3. Atualizar e-mail ou senha (protegido)
+PATCH {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "email": "novo@email.com",
+  "password": "NovaSenhaForte456!"
+}
+
+###
+
+### 4. Deletar usuário (protegido)
+DELETE {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{token}}
+
+###

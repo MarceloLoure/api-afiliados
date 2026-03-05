@@ -11,9 +11,11 @@ import {
   Query,
   ParseUUIDPipe,
   UseGuards,
+  Req,
   Ip,
   Headers,
 } from '@nestjs/common'
+import { Request } from 'express'
 import { ProductsService } from './products.service'
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard'
 import { CreateProductsFromUrlsDto } from './dto/create-product.dto'
@@ -64,9 +66,10 @@ export class ProductsController {
     return this.productsService.remove(id)
   }
 
-  @Post(':id/click')
+  @Get(':id/click')
   trackClick(
     @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
     @Ip() ip: string,
     @Headers('user-agent') userAgent: string,
     @Headers('referer') referer: string,

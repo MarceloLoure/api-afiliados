@@ -17,7 +17,7 @@ GET {{baseUrl}}/ranking/top-products
 
 ###
 
-### 3. Top produtos — limite customizado
+### 3. Top produtos - limite customizado
 GET {{baseUrl}}/ranking/top-products?limit=5
 
 ###
@@ -33,15 +33,8 @@ Authorization: Bearer {{token}}
 
 ###
 
-### 6. Estimativa de conversão por comissão (protegido)
+### 6. Estimativa de conversão (protegido)
 GET {{baseUrl}}/ranking/conversion-estimate
-Authorization: Bearer {{token}}
-
-###
-
-### 7. Disparar cron de ranking manualmente (protegido)
-### Valida todos os produtos na API Shopee, atualiza dados e recalcula scores
-POST {{baseUrl}}/ranking/cron/run
 Authorization: Bearer {{token}}
 
 ###

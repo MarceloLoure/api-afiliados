@@ -43,6 +43,10 @@ export class CategoriesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCategoryDto,
   ) {
+
+    if(!dto.name) {
+      throw new Error('O nome da categoria é obrigatório para atualização')
+    }
     return this.categoriesService.update(id, dto.name)
   }
 

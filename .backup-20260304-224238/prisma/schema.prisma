@@ -36,7 +36,6 @@ model Product {
   originalUrl   String?
   affiliatedUrl String?
   shortLink     String?
-  rankingScore  Float?   @default(0)
 
   categories ProductCategory[]
   dailyStats ProductDailyStats[]
