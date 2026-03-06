@@ -149,6 +149,7 @@ export class HomeService implements OnModuleInit, OnModuleDestroy {
                     commissionRate: true,
                     shortLink: true,
                     affiliatedUrl: true,
+                    shopName: true,
                   },
                 },
               },
